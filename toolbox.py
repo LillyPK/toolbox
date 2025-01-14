@@ -59,24 +59,43 @@ def write_record(record):
     with open(record_file, 'w') as f:
         json.dump(record, f, indent=4)
 
+# changes to uninstall_package are:
+# compatibility with new create_shortcut emplementation.
+# it uses the packages name do delete "package name"."lnk" from the desktop and %appdata%\ravendevteam\"folder name packagename" to remove all data for that package
 def uninstall_package(package_name, skip_confirmation):
     try:
-        install_path = get_installation_path(package_name)
-        if not install_path.exists():
-            handle_error(f"Package '{package_name}' is not installed.")
+        # Define paths
+        user_profile = os.environ.get("USERPROFILE")
+        appdata_path = os.environ.get("APPDATA")
+        if not appdata_path:
+            raise ValueError("Unable to determine the AppData directory.")
+        
+        package_path = os.path.join(appdata_path, "ravendevteam", package_name)
+        shortcut_path = os.path.join(user_profile, "Desktop", f"{package_name}.lnk") if user_profile else None
+
+        # Confirmation (if not skipped)
         if not skip_confirmation:
-            confirmation = input(f"Are you sure you want to uninstall '{package_name}'? (Y/N): ").strip().lower()
-            if confirmation != 'y':
-                print(Fore.WHITE + f"Uninstallation of '{package_name}' cancelled." + Style.RESET_ALL)
+            confirm = input(f"Are you sure you want to uninstall '{package_name}'? [y/N]: ").strip().lower()
+            if confirm != 'y':
+                print("Uninstallation cancelled.")
                 return
-        shutil.rmtree(install_path)
-        print(Fore.GREEN + f"'{package_name}' has been successfully uninstalled." + Style.RESET_ALL)
-        record = read_record()
-        if package_name in record:
-            del record[package_name]
-            write_record(record)
+        
+        # Remove the package directory
+        if os.path.exists(package_path):
+            shutil.rmtree(package_path)
+            print(f"Package '{package_name}' has been removed from '{package_path}'.")
+        else:
+            print(f"No package found at '{package_path}'. Nothing to remove.")
+        
+        # Remove the shortcut
+        if shortcut_path and os.path.exists(shortcut_path):
+            os.remove(shortcut_path)
+            print(f"Shortcut '{shortcut_path}' has been removed.")
+        else:
+            print(f"No shortcut found for '{package_name}' on the Desktop.")
+    
     except Exception as e:
-        handle_error(f"An error occurred while uninstalling '{package_name}': {str(e)}. Please try again.")
+        print(f"Error during uninstallation of '{package_name}': {e}")
 
 def ensure_packages_file():
     package_file_path = get_package_file_path()
