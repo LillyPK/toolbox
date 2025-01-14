@@ -1,6 +1,8 @@
 import os
 import sys
 import json
+import subprocess
+import platform
 import urllib.request
 import hashlib
 from pathlib import Path
@@ -131,20 +133,54 @@ def validate_checksum(file_path, expected_hash):
     return sha256_hash.hexdigest() == expected_hash
 
 def create_shortcut(target, shortcut_name):
+    """
+    Creates a .lnk shortcut on Windows using PowerShell.
+
+    Args:
+        target (str): The path to the target file (e.g., an executable).
+        shortcut_name (str): The name of the shortcut.
+    """
     try:
         if platform.system() == "Windows":
-            from win32com.client import Dispatch
-            shell = Dispatch('WScript.Shell')
-            desktop = shell.SpecialFolders('Desktop')
-            shortcut = shell.CreateShortCut(os.path.join(desktop, f"{shortcut_name}.lnk"))
-            shortcut.TargetPath = target
-            shortcut.WorkingDirectory = os.path.dirname(target)
-            shortcut.IconLocation = target
-            shortcut.save()
+            # Windows: Create a .lnk shortcut using PowerShell
+            desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+            shortcut_path = os.path.join(desktop, f"{shortcut_name}.lnk")
+
+            # Ensure the desktop directory exists
+            if not os.path.exists(desktop):
+                os.makedirs(desktop)
+
+            # PowerShell script to create a .lnk file
+            ps_script = f"""
+            $WshShell = New-Object -ComObject WScript.Shell
+            $Shortcut = $WshShell.CreateShortcut("{shortcut_path}")
+            $Shortcut.TargetPath = "{target}"
+            $Shortcut.WorkingDirectory = "{os.path.dirname(target)}"
+            $Shortcut.IconLocation = "{target},0"
+            $Shortcut.Save()
+            """
+
+            # Run the PowerShell script
+            subprocess.run(["powershell", "-Command", ps_script], check=True)
+            print(Fore.GREEN + f"Shortcut created at {shortcut_path}" + Style.RESET_ALL)
+
         else:
-            os.symlink(target, Path.home() / "Desktop" / f"{shortcut_name}.app")
-    except Exception:
-        handle_warning(f"Could not create a shortcut for '{shortcut_name}'. This will not affect the installation.")
+            # macOS/Linux: Create a symbolic link on the desktop
+            desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+            shortcut_path = os.path.join(desktop, shortcut_name)
+
+            # Ensure the desktop directory exists
+            if not os.path.exists(desktop):
+                os.makedirs(desktop)
+
+            # Create the symbolic link
+            if os.path.exists(shortcut_path):
+                os.remove(shortcut_path)  # Remove existing link if it exists
+            os.symlink(target, shortcut_path)
+            print(Fore.GREEN + f"Symbolic link created at {shortcut_path}" + Style.RESET_ALL)
+
+    except Exception as e:
+        handle_warning(f"Could not create a shortcut for '{shortcut_name}': {e}")
 
 def install_package(package_name, skip_confirmation):
     try:
@@ -199,31 +235,52 @@ def install_package(package_name, skip_confirmation):
         handle_error(f"An error occurred during installation: {e}.")
 
 def main():
-    parser = argparse.ArgumentParser(description="Toolbox Package Manager")
-    parser.add_argument("command", choices=["list", "install", "uninstall", "update", "help", "json"], help="Command to execute", nargs="?")
-    parser.add_argument("package", nargs="?", help="Package name (required for install and uninstall)")
-    parser.add_argument("-y", "--yes", action="store_true", help="Skip confirmation prompts")
-    args = parser.parse_args()
-    if not args.command:
-        parser.print_help()
-        return
-    if args.command == "list":
-        list_packages()
-    elif args.command == "install":
-        if not args.package:
-            handle_error("You must specify the package name to install.")
-        install_package(args.package, args.yes)
-    elif args.command == "uninstall":
-        if not args.package:
-            handle_error("You must specify the package name to uninstall.")
-        uninstall_package(args.package, args.yes)
-    elif args.command == "update":
-        update_packages()
-    elif args.command == "help":
-        parser.print_help()
-    elif args.command == "json":
-        print(get_package_file_path())
+    print(Fore.CYAN + "Welcome to the Toolbox Package Manager!" + Style.RESET_ALL)
+    print("Type 'help' for a list of commands or 'exit' to quit.")
 
+    while True:
+        try:
+            user_input = input(Fore.WHITE + "toolbox> " + Style.RESET_ALL).strip()
+            if not user_input:
+                continue
+
+            if user_input.lower() == "exit":
+                print(Fore.GREEN + "Goodbye!" + Style.RESET_ALL)
+                break
+
+            args = user_input.split()
+            command = args[0].lower()
+            package = args[1] if len(args) > 1 else None
+            skip_confirmation = "-y" in args or "--yes" in args
+
+            if command == "list":
+                list_packages()
+            elif command == "install":
+                if not package:
+                    handle_error("You must specify the package name to install.")
+                install_package(package, skip_confirmation)
+            elif command == "uninstall":
+                if not package:
+                    handle_error("You must specify the package name to uninstall.")
+                uninstall_package(package, skip_confirmation)
+            elif command == "update":
+                update_packages()
+            elif command == "help":
+                print("""
+Available Commands:
+list               List all available packages.
+install <package>  Install the specified package.
+uninstall <package> Uninstall the specified package.
+update             Update the package list.
+exit               Exit the application.
+                """)
+            else:
+                handle_warning("Unknown command. Type 'help' for a list of commands.")
+        except KeyboardInterrupt:
+            print(Fore.GREEN + "\nGoodbye!" + Style.RESET_ALL)
+            break
+        except Exception as e:
+            handle_error(f"An unexpected error occurred: {e}")
 
 if __name__ == "__main__":
     main()
